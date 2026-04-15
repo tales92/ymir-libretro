@@ -1,127 +1,97 @@
-cmake_minimum_required(VERSION 3.28)
-project(Ymir VERSION 0.3.0)
+# =============================================================================
+# Ymir Libretro Core - CMake Build System
+# =============================================================================
 
-include(cmake/CMakeRC.cmake)
-include(cmake/CopyRuntimeDLLs.cmake)
-include(cmake/TargetConditionalSources.cmake)
+cmake_minimum_required(VERSION 3.16)
+project(Ymir_Libretro CXX)
 
-# CMake project structured adapted from Alex Reinking's SharedStaticStarter
-# GitHub: https://github.com/alexreinking/SharedStaticStarter
-# Blog: https://alexreinking.com/blog/building-a-dual-shared-and-static-library-with-cmake.html
+# -----------------------------------------------------------------------------
+# 1. Configurações Iniciais do Ymir (Devem vir ANTES do add_subdirectory)
+# -----------------------------------------------------------------------------
+# Forçamos a compilação estática das dependências do Ymir. O core Libretro
+# não pode depender de DLLs/SOs externos de tempo de execução (como fmt, CHD, etc).
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Force static build for ymir-core" FORCE)
 
-## Determine if this is a top-level build or included as a subproject
-string(COMPARE EQUAL "${CMAKE_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}" is_top_level)
+# Desabilitamos logs de debug e asserções para máxima performance no RetroArch
+set(Ymir_ENABLE_DEVLOG OFF CACHE BOOL "Disable dev logging" FORCE)
+set(Ymir_ENABLE_DEV_ASSERTIONS OFF CACHE BOOL "Disable dev assertions" FORCE)
+set(Ymir_DEV_BUILD OFF CACHE BOOL "Disable dev build mode" FORCE)
 
-option(Ymir_INCLUDE_PACKAGING "Include packaging rules for Ymir" "${is_top_level}")
-option(Ymir_DEV_BUILD "Mark as a development build" ON)
-option(Ymir_EXTRA_INLINING "Enable more aggressive inlining (slows down build!)" "${is_top_level}")
-option(Ymir_ENABLE_TESTS "Enable tests for Ymir" "${is_top_level}")
-option(Ymir_ENABLE_SANDBOX "Compile the sandbox app" "${is_top_level}")
-option(Ymir_ENABLE_YMDASM "Compile the disassembly tool" "${is_top_level}")
-option(Ymir_ENABLE_IPO "Enable IPO / LTO for Ymir" ON)
-option(Ymir_ENABLE_DEVLOG "Enable development logs" ${Ymir_DEV_BUILD})
-option(Ymir_ENABLE_DEV_ASSERTIONS "Enable development-time assertions" OFF)
-option(Ymir_ENABLE_IMGUI_DEMO "Enable ImGui demo window" ON)
-option(Ymir_ENABLE_UPDATE_CHECKS "Enable update checks" ON)
+# Desabilitamos AVX2. Cores Libretro devem ser altamente portáteis.
+# Usuários que querem OTIMIZAÇÕES LOCAIS podem ligar isso manualmente.
+set(Ymir_AVX2 OFF CACHE BOOL "Disable AVX2 for maximum compatibility" FORCE)
 
-if (Ymir_DEV_BUILD)
-    message(STATUS "Ymir: Development build")
-else ()
-    message(STATUS "Ymir: Release build")
-endif ()
-message(STATUS "Ymir: Devlog ${Ymir_ENABLE_DEVLOG}")
-message(STATUS "Ymir: Extra inlining ${Ymir_EXTRA_INLINING}")
-message(STATUS "Ymir: Update checks ${Ymir_ENABLE_UPDATE_CHECKS}")
+# -----------------------------------------------------------------------------
+# 2. Incluir o Motor Ymir
+# -----------------------------------------------------------------------------
+# Assumindo que o código original do Ymir está em libs/ymir-core.
+# Ajuste este caminho conforme a estrutura da sua pasta.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/libs/ymir-core)
 
-# Create Universal Binary on MacOS
-#if (APPLE)
-#    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
-#endif ()
+# -----------------------------------------------------------------------------
+# 3. Criar o Target do Core Libretro
+# -----------------------------------------------------------------------------
+# O RetroArch exige um módulo dinâmico (.so, .dll, .dylib)
+add_library(ymir_libretro SHARED
+    libretro.cpp
+)
 
-# Detect target architectures
-# ARCHITECTURES may have multiple variables in the case of a multi-arch build
-# such as a universal binary on MacOS
-include(cmake/DetectArchitecture.cmake)
-if (NOT DEFINED ARCHITECTURES)
-    message(FATAL_ERROR "Unsupported architecture")
-endif ()
-message(STATUS "Ymir: Architecture(s) ${ARCHITECTURES}")
+# -----------------------------------------------------------------------------
+# 4. Propriedades do Target
+# -----------------------------------------------------------------------------
+# Padroniza o nome do arquivo de saída para 'ymir_libretro' (sem o 'lib' padrão no Linux)
+set_target_properties(ymir_libretro PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "ymir_libretro"
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+)
 
-## Performance options
-if ("x86_64" IN_LIST ARCHITECTURES)
-	option(Ymir_AVX2 "Enable AVX2 instruction set for Ymir" OFF)
-	if (Ymir_AVX2)
-		message(STATUS "Ymir: Using AVX2 instruction set")
-	else ()
-		message(STATUS "Ymir: Using SSE2 instruction set")
-	endif ()
-endif ()
+# -----------------------------------------------------------------------------
+# 5. Includes e Definições
+# -----------------------------------------------------------------------------
+# Inclui o diretório onde está o libretro.h (assumindo que esteja na mesma pasta)
+target_include_directories(ymir_libretro PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-if ("arm64" IN_LIST ARCHITECTURES)
-	message(STATUS "Ymir: Using NEON instruction set")
-endif ()
+# Garante que a API do Libretro será exportada corretamente (especialmente no Windows/MSVC)
+target_compile_definitions(ymir_libretro PRIVATE LIBRETRO_EXPORTS)
 
+# -----------------------------------------------------------------------------
+# 6. Linkagem
+# -----------------------------------------------------------------------------
+# Linka o motor do Ymir estaticamente no nosso core.
+# Como ymir-core é compilado como STATIC (definido acima), o CMake vai embutir
+# todo o código do Ymir, fmt, chdr, xxhash, etc., dentro do nosso arquivo final.
+target_link_libraries(ymir_libretro PRIVATE ymir-core)
 
-## C++ language configuration boilerplate
-if (NOT DEFINED CMAKE_CXX_VISIBILITY_PRESET AND
-    NOT DEFINED CMAKE_VISIBILITY_INLINES_HIDDEN)
-  set(CMAKE_CXX_VISIBILITY_PRESET hidden)
-  set(CMAKE_VISIBILITY_INLINES_HIDDEN YES)
-endif ()
+# -----------------------------------------------------------------------------
+# 7. Ajustes Específicos por Plataforma
+# -----------------------------------------------------------------------------
+if(MSVC)
+    # No Windows com MSVC, precisamos forçar a exportação dos símbolos do Libretro
+    # e garantir que não haja dependências de DLLs do C++ runtime.
+    target_compile_options(ymir_libretro PRIVATE /MT) # Usa o CRT estático (Multi-threaded)
+    target_link_options(ymir_libretro PRIVATE 
+        /DEF:${CMAKE_CURRENT_SOURCE_DIR}/libretro.def # Arquivo .def padrão do Libretro (opcional, mas seguro)
+    )
+else()
+    # No Linux/macOS, esconde todos os símbolos por padrão, exceto os do Libretro (retro_*)
+    # Isso evita conflitos com o frontend ou outros cores carregados na memória.
+    target_compile_options(ymir_libretro PRIVATE -fvisibility=hidden)
+    
+    # No macOS, precisamos linkar contra o framework CoreFoundation (exigido por std::filesystem)
+    if(APPLE)
+        target_link_libraries(ymir_libretro PRIVATE "-framework CoreFoundation")
+    endif()
+endif()
 
-## Force static linkage
-set(Ymir_SHARED_LIBS OFF)
-set(BUILD_SHARED_LIBS OFF)
-
-## Let Ymir_SHARED_LIBS override BUILD_SHARED_LIBS
-#if (DEFINED Ymir_SHARED_LIBS)
-#    set(BUILD_SHARED_LIBS "${Ymir_SHARED_LIBS}")
-#endif ()
-
-## Build static libraries by default if BUILD_SHARED_LIBS is not specified
-#if (NOT DEFINED BUILD_SHARED_LIBS)
-#    set(BUILD_SHARED_LIBS OFF)
-#endif ()
-
-## Configure Visual Studio solution
-if (MSVC)
-    include(cmake/VSHelpers.cmake)
-
-    set_property(GLOBAL PROPERTY USE_FOLDERS ON)
-endif ()
-
-## Enable LTO if supported
-include(CheckIPOSupported)
-check_ipo_supported(RESULT IPO_SUPPORTED OUTPUT IPO_ERROR)
-
-if (IPO_SUPPORTED)
-    message(STATUS "IPO / LTO supported")
-else ()
-    message(STATUS "IPO / LTO not supported: ${IPO_ERROR}")
-endif ()
-
-## Include third-party libraries
-add_subdirectory(vendor)
-
-## Configure PGO (apply after vendor so third-party libs don't inherit flags)
-include(cmake/PGO.cmake)
-ymir_configure_pgo()
-
-## Include project libraries and apps
-add_subdirectory(libs)
-add_subdirectory(apps)
-
-## Include the install rules if the user wanted them (included by default when top-level)
-if (Ymir_INCLUDE_PACKAGING)
-    add_subdirectory(packaging)
-endif ()
-
-## Include the unit tests if the user wanted them (included by default when top-level)
-if (Ymir_ENABLE_TESTS)
-    add_subdirectory(tests)
-endif ()
-
-## Configure Visual Studio solution
-if (MSVC)
-    set_property(DIRECTORY "${CMAKE_CURRENT_LIST_DIR}" PROPERTY VS_STARTUP_PROJECT ymir-sdl3)
-endif ()
+# -----------------------------------------------------------------------------
+# 8. Pós-build (Opcional)
+# -----------------------------------------------------------------------------
+# Copia o core automaticamente para a pasta de cores do RetroArch após compilar
+# Descomente e ajuste o caminho conforme o seu sistema
+# add_custom_command(TARGET ymir_libretro POST_BUILD
+#     COMMAND ${CMAKE_COMMAND} -E copy 
+#     $<TARGET_FILE:ymir_libretro> 
+#     "C:/RetroArch-Win64/cores/"
+# )
