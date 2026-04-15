@@ -53,15 +53,13 @@ static retro_input_state_t input_state_cb   = NULL;
 // =============================================================================
 
 // O VDP2 chama esta função quando termina de compor um frame XRGB8888
-static void ymir_video_frame_complete(uint32 *fb, uint32 width, uint32 height) {
+static void ymir_video_frame_complete(uint32 *fb, uint32 width, uint32 height, void* /*userdata*/) {
     g_video_fb = fb;
     g_video_w = width;
     g_video_h = height;
 }
-
 // O SCSP chama esta função para cada amostra estéreo gerada
-// O SCSP chama esta função para cada amostra estéreo gerada
-static void ymir_audio_output_callback(sint16 left, sint16 right) {
+static void ymir_audio_output_callback(sint16 left, sint16 right, void* /*userdata*/) {
     g_audio_buffer.push_back(left);
     g_audio_buffer.push_back(right);
 }
@@ -72,33 +70,32 @@ static void ymir_audio_output_callback(sint16 left, sint16 right) {
 static void update_ymir_input() {
     if (!g_saturn || !g_pad1 || !input_state_cb) return;
 
-    // Acessa o report do controle diretamente (Requer GetReport() adicionado por você)
+    // Acessa o report do controle diretamente
     auto& report = g_pad1->GetReport();
 
-    // No protocolo do Saturn, os botões são ACTIVE-LOW:
-    // 0 = Apertado, 1 = Solto. Por isso usamos o operador "!" para inverter 
-    // o estado vindo do RetroArch (onde 1 = Apertado).
+    // No protocolo do Saturn, os botões são ACTIVE-LOW (0 = Apertado, 1 = Solto).
+    // O Ymir guarda todos os botões dentro da subestrutura "buttons".
 
     // D-Pad
-    report.up     = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP);
-    report.down   = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN);
-    report.left   = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT);
-    report.right  = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT);
+    report.buttons.up     = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP);
+    report.buttons.down   = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN);
+    report.buttons.left   = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT);
+    report.buttons.right  = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT);
     
     // Start
-    report.start  = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START);
+    report.buttons.start  = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START);
     
     // Mão direita (Layout padrão do Saturn no RetroArch)
-    report.a      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B);
-    report.b      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A);
-    report.c      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R);
-    report.x      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y);
-    report.y      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X);
-    report.z      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L);
+    report.buttons.a      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B);
+    report.buttons.b      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A);
+    report.buttons.c      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R);
+    report.buttons.x      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y);
+    report.buttons.y      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X);
+    report.buttons.z      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L);
     
     // Ombros (Triggers)
-    report.l      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2);
-    report.r      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2);
+    report.buttons.l      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2);
+    report.buttons.r      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2);
 }
 
 // =============================================================================
@@ -154,9 +151,9 @@ extern "C" void retro_init(void) {
             swRenderer->EnableThreadedVDP1(false);
             swRenderer->EnableThreadedVDP2(false);
         }
-        g_saturn->VDP.SetSoftwareRenderCallback([](uint32 *fb, uint32 width, uint32 height) { ymir_video_frame_complete(fb, width, height); });
+        g_saturn->VDP.SetSoftwareRenderCallback(ymir_video_frame_complete);
         // 2. Configurar o callback de Áudio
-        g_saturn->SCSP.SetSampleCallback([](sint16 left, sint16 right) { ymir_audio_output_callback(left, right); });
+        g_saturn->SCSP.SetSampleCallback(ymir_audio_output_callback);
 
         // 3. Conectar o Control Pad na Porta 1 do SMPC
         g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
