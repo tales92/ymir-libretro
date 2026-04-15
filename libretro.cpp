@@ -60,12 +60,10 @@ static void ymir_video_frame_complete(uint32 *fb, uint32 width, uint32 height) {
 }
 
 // O SCSP chama esta função para cada amostra estéreo gerada
-static void ymir_audio_output_callback(sint32 left, sint32 right) {
-    // Converte de 32-bit signed para 16-bit signed (downscale com clamp)
-    int16_t l = (int16_t)std::clamp(left >> 16, -32768, 32767);
-    int16_t r = (int16_t)std::clamp(right >> 16, -32768, 32767);
-    g_audio_buffer.push_back(l);
-    g_audio_buffer.push_back(r);
+// O SCSP chama esta função para cada amostra estéreo gerada
+static void ymir_audio_output_callback(sint16 left, sint16 right) {
+    g_audio_buffer.push_back(left);
+    g_audio_buffer.push_back(right);
 }
 
 // =============================================================================
