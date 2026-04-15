@@ -157,7 +157,7 @@ extern "C" void retro_init(void) {
         g_saturn->VDP.SetSoftwareRenderCallback(ymir_video_frame_complete);
 
         // 2. Configurar o callback de Áudio
-        g_saturn->SCSP.SetSampleCallback(ymir_audio_output_callback);
+        g_saturn->SCSP.SetSampleCallback([](auto left, auto right) { ymir_audio_output_callback(left, right); });
 
         // 3. Conectar o Control Pad na Porta 1 do SMPC
         g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
