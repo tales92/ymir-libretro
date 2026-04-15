@@ -142,7 +142,7 @@ target_compile_definitions(ymir_libretro PRIVATE LIBRETRO_EXPORTS)
 target_link_libraries(ymir_libretro PRIVATE ymir-core)
 
 if(MSVC)
-    target_compile_options(ymir_libretro PRIVATE /MT)
+    target_compile_options(ymir_libretro PRIVATE /MD)
 else()
     target_compile_options(ymir_libretro PRIVATE -fvisibility=hidden)
 endif()
