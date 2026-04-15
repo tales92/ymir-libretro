@@ -11,6 +11,7 @@ namespace ymir::peripheral {
 /// - Start button
 class ControlPad final : public BasePeripheral {
 public:
+auto& GetReport() { return m_report; }
     explicit ControlPad(CBPeripheralReport callback);
 
     void UpdateInputs() override;
