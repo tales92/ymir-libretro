@@ -10,7 +10,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4  # Atualizado para v4
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
@@ -18,11 +18,11 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake .. -T ClangCL -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DBUILD_SHARED_LIBS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON
+          cmake .. -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DBUILD_SHARED_LIBS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           cmake --build . --config Release --target ymir_libretro
 
       - name: Entregar a DLL para Download
-        uses: actions/upload-artifact@v4  # ATUALIZADO PARA V4 (Resolve o erro vermelho)
+        uses: actions/upload-artifact@v4
         with:
           name: ymir_libretro_windows
           path: build/**/ymir_libretro.dll
