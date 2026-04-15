@@ -10,6 +10,8 @@ jobs:
     steps:
     - name: Baixar o código
       uses: actions/checkout@v4
+      with:
+        submodules: recursive
 
     - name: Configurar e Compilar
       run: |
