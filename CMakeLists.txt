@@ -4,7 +4,10 @@
 
 cmake_minimum_required(VERSION 3.16)
 project(Ymir_Libretro CXX)
-
+# --- TRUQUE PARA IGNORAR O COMANDO DE VISUAL STUDIO DO YMIR ---
+macro(vs_set_filters)
+endmacro()
+# --------------------------------------------------------------
 # -----------------------------------------------------------------------------
 # 1. Configurações Iniciais do Ymir (Devem vir ANTES do add_subdirectory)
 # -----------------------------------------------------------------------------
