@@ -1,0 +1,25 @@
+name: Compilar Ymir Libretro (Windows)
+
+on: 
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Baixar o código
+      uses: actions/checkout@v4
+
+    - name: Configurar e Compilar
+      run: |
+        mkdir build
+        cd build
+        cmake .. -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" -DBUILD_SHARED_LIBS=OFF
+        cmake --build . --config Release
+
+    - name: Salvar o Arquivo .dll
+      uses: actions/upload-artifact@v4
+      with:
+        name: ymir_libretro_windows
+        path: build/Release/*.dll
