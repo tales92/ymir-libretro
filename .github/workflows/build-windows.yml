@@ -10,7 +10,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4  # Atualizado para v4
         with:
           submodules: recursive
 
@@ -22,7 +22,7 @@ jobs:
           cmake --build . --config Release
 
       - name: Entregar a DLL para Download
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4  # ATUALIZADO PARA V4 (Resolve o erro vermelho)
         with:
           name: ymir_libretro_windows
-          path: build/Release/ymir_libretro.dll
+          path: build/**/ymir_libretro.dll
