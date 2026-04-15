@@ -70,32 +70,35 @@ static void ymir_audio_output_callback(sint16 left, sint16 right, void* /*userda
 static void update_ymir_input() {
     if (!g_saturn || !g_pad1 || !input_state_cb) return;
 
-    // Acessa o report do controle diretamente
+    // Acessa o report do controle
     auto& report = g_pad1->GetReport();
 
-    // No protocolo do Saturn, os botões são ACTIVE-LOW (0 = Apertado, 1 = Solto).
-    // O Ymir guarda todos os botões dentro da subestrutura "buttons".
+    // 1. O Ymir usa lógica "Active-Low" (todos os bits em 1 = botões soltos)
+    // Começamos declarando que todos os botões do controle estão soltos (Button::All)
+    auto current_buttons = ymir::peripheral::Button::All;
 
-    // D-Pad
-    report.buttons.up     = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP);
-    report.buttons.down   = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN);
-    report.buttons.left   = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT);
-    report.buttons.right  = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT);
+    // 2. Se o botão do RetroArch for pressionado, nós "apagamos" (0) o bit correspondente
+    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP))    current_buttons &= ~ymir::peripheral::Button::Up;
+    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN))  current_buttons &= ~ymir::peripheral::Button::Down;
+    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT))  current_buttons &= ~ymir::peripheral::Button::Left;
+    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT)) current_buttons &= ~ymir::peripheral::Button::Right;
     
-    // Start
-    report.buttons.start  = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START);
+    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START)) current_buttons &= ~ymir::peripheral::Button::Start;
     
-    // Mão direita (Layout padrão do Saturn no RetroArch)
-    report.buttons.a      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B);
-    report.buttons.b      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A);
-    report.buttons.c      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R);
-    report.buttons.x      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y);
-    report.buttons.y      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X);
-    report.buttons.z      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L);
+    // Mapeamento da mão direita (Layout padrão do Saturn no RetroArch)
+    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B))     current_buttons &= ~ymir::peripheral::Button::A;
+    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A))     current_buttons &= ~ymir::peripheral::Button::B;
+    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R))     current_buttons &= ~ymir::peripheral::Button::C;
+    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y))     current_buttons &= ~ymir::peripheral::Button::X;
+    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X))     current_buttons &= ~ymir::peripheral::Button::Y;
+    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L))     current_buttons &= ~ymir::peripheral::Button::Z;
     
     // Ombros (Triggers)
-    report.buttons.l      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2);
-    report.buttons.r      = !input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2);
+    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2))    current_buttons &= ~ymir::peripheral::Button::L;
+    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2))    current_buttons &= ~ymir::peripheral::Button::R;
+
+    // 3. Salvamos o estado calculado de volta no controle
+    report.buttons = current_buttons;
 }
 
 // =============================================================================
