@@ -1,6 +1,8 @@
-name: Compilar Ymir Libretro (Windows)
+name: Build Windows
 
-on: 
+on:
+  push:
+    branches: [ "master", "main" ]
   workflow_dispatch:
 
 jobs:
@@ -8,19 +10,19 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - name: Baixar o código
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
 
-    - name: Configurar e Compilar
-      run: |
-        mkdir build
-        cd build
-        cmake .. -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DBUILD_SHARED_LIBS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON
+      - name: Configurar e Compilar
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DBUILD_SHARED_LIBS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON
+          cmake --build . --config Release
 
-    - name: Salvar o Arquivo .dll
-      uses: actions/upload-artifact@v4
-      with:
-        name: ymir_libretro_windows
-        path: build/Release/*.dll
+      - name: Entregar a DLL para Download
+        uses: actions/upload-artifact@v3
+        with:
+          name: ymir_libretro_windows
+          path: build/Release/ymir_libretro.dll
