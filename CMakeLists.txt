@@ -137,12 +137,18 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libretro.h")
 endif()
 
 add_library(ymir_libretro SHARED libretro.cpp)
+
+# --- DESTRANCA AS PORTAS PARA O RETROARCH ---
+set_target_properties(ymir_libretro PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+
+# --- LIGAÇÕES DO NÚCLEO ---
 target_include_directories(ymir_libretro PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(ymir_libretro PRIVATE LIBRETRO_EXPORTS)
+target_compile_definitions(ymir_libretro PRIVATE RETRO_EXPORT)
 target_link_libraries(ymir_libretro PRIVATE ymir-core)
 
+# --- BLINDAGEM ESTÁTICA (Mata o erro do /MD) ---
 if(MSVC)
-    target_compile_options(ymir_libretro PRIVATE /MD)
+    target_compile_options(ymir_libretro PRIVATE /MT)
 else()
     target_compile_options(ymir_libretro PRIVATE -fvisibility=hidden)
 endif()
