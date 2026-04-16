@@ -23,4 +23,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: ymir_libretro_windows
-        path: build/Release/*.dll
+        path: build/**/*.dll
