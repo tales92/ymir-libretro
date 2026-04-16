@@ -17,7 +17,6 @@ jobs:
       run: |
         mkdir build
         cd build
-        # Removi as flags que causaram o erro de 'assert' e 'constant expression'
         cmake .. -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" -DBUILD_SHARED_LIBS=OFF
         cmake --build . --config Release
 
@@ -25,5 +24,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: ymir_libretro_windows
-        # Usamos o radar para garantir que ele ache a DLL onde quer que ela caia
         path: "**/*.dll"
