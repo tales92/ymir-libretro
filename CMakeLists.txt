@@ -139,14 +139,14 @@ endif()
 add_library(ymir_libretro SHARED libretro.cpp)
 
 # --- DESTRANCA AS PORTAS PARA O RETROARCH ---
-add_library(ymir_libretro SHARED libretro.cpp)
+set_target_properties(ymir_libretro PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
-# Ligações do Núcleo
+# --- LIGAÇÕES DO NÚCLEO ---
 target_include_directories(ymir_libretro PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(ymir_libretro PRIVATE RETRO_EXPORT)
 target_link_libraries(ymir_libretro PRIVATE ymir-core)
 
-# Blindagem Estática (O que faz não pedir DLL no Windows)
+# --- BLINDAGEM ESTÁTICA ---
 if(MSVC)
     target_compile_options(ymir_libretro PRIVATE /MT)
 else()
