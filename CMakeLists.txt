@@ -136,7 +136,7 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libretro.h")
                   "${CMAKE_CURRENT_SOURCE_DIR}/libretro.h")
 endif()
 
-add_library(ymir_libretro SHARED libretro.cpp)
+add_library(ymir_libretro SHARED ymir_libretro.cpp)
 target_include_directories(ymir_libretro PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(ymir_libretro PRIVATE LIBRETRO_EXPORTS)
 target_link_libraries(ymir_libretro PRIVATE ymir-core)
