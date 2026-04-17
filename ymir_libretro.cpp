@@ -275,6 +275,12 @@ extern "C" void retro_run(void) {
 // =============================================================================
 
 extern "C" void retro_reset(void) { if (g_saturn) g_saturn->Reset(true); }
+
+// ---> ADICIONE ESTAS 3 LINHAS AQUI <---
+extern "C" void retro_set_controller_port_device(unsigned port, unsigned device) {
+    // Stub vazio obrigatório pelo RetroArch
+}
+
 extern "C" size_t retro_serialize_size(void) { return 0; }
 extern "C" bool retro_serialize(void *data, size_t size) { return false; }
 extern "C" bool retro_unserialize(const void *data, size_t size) { return false; }
