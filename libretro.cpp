@@ -5,6 +5,7 @@
 // LoadDisc (Mídia) e SMPC (Input Active-Low) totalmente integrados.
 // =============================================================================
 
+#include <exception>
 #include <libretro.h>
 #include <stdint.h>
 #include <string.h>
@@ -223,7 +224,7 @@ extern "C" bool retro_load_game(const struct retro_game_info *game) {
     return true;
 }
 
-extern "C" void retro_unload_game(void) {
+{
     if (g_saturn) g_saturn->EjectDisc();
 }
 
