@@ -3,9 +3,10 @@
 // =============================================================================
 // Versão Final Completa: CPU, VDP (Vídeo Dinâmico), SCSP (Áudio Push), 
 // LoadDisc (Mídia) e SMPC (Input Active-Low) totalmente integrados.
+// BLINDADO: Com blocos try/catch para evitar o fechamento silencioso.
 // =============================================================================
 
-#include <exception>
+#include <exception> // ADICIONADO PARA O ESCUDO
 #include <libretro.h>
 #include <stdint.h>
 #include <string.h>
@@ -75,10 +76,9 @@ static void update_ymir_input() {
     auto& report = g_pad1->GetReport();
 
     // 1. O Ymir usa lógica "Active-Low" (todos os bits em 1 = botões soltos)
-    // Começamos declarando que todos os botões do controle estão soltos (Button::All)
     auto current_buttons = ymir::peripheral::Button::All;
 
-    // 2. Se o botão do RetroArch for pressionado, nós "apagamos" (0) o bit correspondente
+    // 2. Se o botão do RetroArch for pressionado, apagamos (0) o bit correspondente
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP))    current_buttons &= ~ymir::peripheral::Button::Up;
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN))  current_buttons &= ~ymir::peripheral::Button::Down;
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT))  current_buttons &= ~ymir::peripheral::Button::Left;
@@ -86,7 +86,7 @@ static void update_ymir_input() {
     
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START)) current_buttons &= ~ymir::peripheral::Button::Start;
     
-    // Mapeamento da mão direita (Layout padrão do Saturn no RetroArch)
+    // Mapeamento da mão direita
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B))     current_buttons &= ~ymir::peripheral::Button::A;
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A))     current_buttons &= ~ymir::peripheral::Button::B;
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R))     current_buttons &= ~ymir::peripheral::Button::C;
@@ -145,26 +145,30 @@ extern "C" void retro_get_system_av_info(struct retro_system_av_info *info) {
 // =============================================================================
 
 extern "C" void retro_init(void) {
-    g_saturn = std::make_unique<ymir::Saturn>();
-    
-    if (g_saturn) {
-        // 1. Configurar o renderizador de Vídeo (Software, síncrono)
-        auto* swRenderer = g_saturn->VDP.UseSoftwareRenderer();
-        if (swRenderer) {
-            // Desabilitar threads internas do Ymir para evitar race conditions no Libretro
-            swRenderer->EnableThreadedVDP1(false);
-            swRenderer->EnableThreadedVDP2(false);
-        }
-        g_saturn->VDP.SetSoftwareRenderCallback(ymir_video_frame_complete);
-        // 2. Configurar o callback de Áudio
-        g_saturn->SCSP.SetSampleCallback(ymir_audio_output_callback);
+    try { // ESCUDO DE INIT
+        g_saturn = std::make_unique<ymir::Saturn>();
+        
+        if (g_saturn) {
+            // 1. Configurar o renderizador de Vídeo
+            auto* swRenderer = g_saturn->VDP.UseSoftwareRenderer();
+            if (swRenderer) {
+                swRenderer->EnableThreadedVDP1(false);
+                swRenderer->EnableThreadedVDP2(false);
+            }
+            g_saturn->VDP.SetSoftwareRenderCallback(ymir_video_frame_complete);
+            
+            // 2. Configurar o callback de Áudio
+            g_saturn->SCSP.SetSampleCallback(ymir_audio_output_callback);
 
-        // 3. Conectar o Control Pad na Porta 1 do SMPC
-        g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
+            // 3. Conectar o Control Pad na Porta 1 do SMPC
+            g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
+        }
+        
+        g_prev_width = 0;
+        g_prev_height = 0;
+    } catch (const std::exception& e) {
+        printf("[Ymir Libretro] ERRO FATAL AO INICIAR: %s\n", e.what());
     }
-    
-    g_prev_width = 0;
-    g_prev_height = 0;
 }
 
 extern "C" void retro_deinit(void) {
@@ -174,57 +178,60 @@ extern "C" void retro_deinit(void) {
 }
 
 extern "C" bool retro_load_game(const struct retro_game_info *game) {
-    if (!game || !game->path) return false;
+    try { // ESCUDO DE CARREGAMENTO
+        if (!game || !game->path) return false;
 
-    // 1. Formato de pixel do frontend
-    enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_XRGB8888;
-    if (!env_cb || !env_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt)) {
-        printf("[Ymir Libretro] Aviso: Frontend não suporta XRGB8888.\n");
-    }
-
-    // 2. Carregar a BIOS (IPL ROM)
-    const char *system_dir = NULL;
-    if (env_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system_dir) && system_dir) {
-        constexpr size_t kIPLSize = 524288; 
-        std::vector<uint8_t> iplData(kIPLSize);
-        std::filesystem::path iplPath = std::filesystem::path(system_dir) / "saturn_bios.bin";
-        std::ifstream iplFile(iplPath, std::ios::binary);
-        
-        if (iplFile.is_open() && iplFile.read(reinterpret_cast<char*>(iplData.data()), kIPLSize)) {
-            g_saturn->LoadIPL(std::span<uint8_t, kIPLSize>(iplData.data(), kIPLSize));
-        } else {
-            printf("[Ymir Libretro] Erro fatal: BIOS do Saturn não encontrada em %s\n", iplPath.string().c_str());
-            return false; 
+        // 1. Formato de pixel do frontend
+        enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_XRGB8888;
+        if (!env_cb || !env_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt)) {
+            printf("[Ymir Libretro] Aviso: Frontend não suporta XRGB8888.\n");
         }
-    } else {
-        printf("[Ymir Libretro] Erro fatal: Diretório de sistema não definido no RetroArch.\n");
+
+        // 2. Carregar a BIOS (IPL ROM)
+        const char *system_dir = NULL;
+        if (env_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system_dir) && system_dir) {
+            constexpr size_t kIPLSize = 524288; 
+            std::vector<uint8_t> iplData(kIPLSize);
+            std::filesystem::path iplPath = std::filesystem::path(system_dir) / "saturn_bios.bin";
+            std::ifstream iplFile(iplPath, std::ios::binary);
+            
+            if (iplFile.is_open() && iplFile.read(reinterpret_cast<char*>(iplData.data()), kIPLSize)) {
+                g_saturn->LoadIPL(std::span<uint8_t, kIPLSize>(iplData.data(), kIPLSize));
+            } else {
+                printf("[Ymir Libretro] Erro fatal: BIOS do Saturn não encontrada em %s\n", iplPath.string().c_str());
+                return false; 
+            }
+        } else {
+            printf("[Ymir Libretro] Erro fatal: Diretório de sistema não definido no RetroArch.\n");
+            return false;
+        }
+
+        // 3. Carregar a imagem do Disco
+        printf("[Ymir Libretro] Carregando disco: %s\n", game->path);
+        
+        ymir::media::Disc disc;
+        bool loaded = ymir::media::LoadDisc(game->path, disc, false, nullptr);
+        
+        if (!loaded) {
+            printf("[Ymir Libretro] Falha ao analisar/abrir o arquivo de disco!\n");
+            return false;
+        }
+
+        // 4. Injeta o disco no drive e auto-detecta a região
+        g_saturn->LoadDisc(std::move(disc));
+
+        // 5. Hard Reset para dar boot no disco com a BIOS
+        g_saturn->Reset(true); 
+
+        return true;
+    } catch (const std::exception& e) {
+        printf("[Ymir Libretro] ERRO FATAL DE BIOS OU DISCO: %s\n", e.what());
         return false;
     }
-
-    // 3. Carregar a imagem do Disco
-    printf("[Ymir Libretro] Carregando disco: %s\n", game->path);
-    
-    ymir::media::Disc disc;
-    // preloadToRAM = false para economizar memória, cbMsg = nullptr (sem UI de log)
-    bool loaded = ymir::media::LoadDisc(game->path, disc, false, nullptr);
-    
-    if (!loaded) {
-        printf("[Ymir Libretro] Falha ao analisar/abrir o arquivo de disco!\n");
-        return false;
-    }
-
-    // 4. Injeta o disco no drive e auto-detecta a região
-    g_saturn->LoadDisc(std::move(disc));
-    // TODO: Ativar detecção automática de região assim que a API do Ymir para AreaCode for mapeada
-    // g_saturn->AutodetectRegion(g_saturn->GetDisc().header.GetAreaCodes());
-
-    // 5. Hard Reset para dar boot no disco com a BIOS
-    g_saturn->Reset(true); 
-
-    return true;
 }
 
-{
+// Correção da função unload_game que estava perdida
+extern "C" void retro_unload_game(void) {
     if (g_saturn) g_saturn->EjectDisc();
 }
 
@@ -233,47 +240,48 @@ extern "C" bool retro_load_game(const struct retro_game_info *game) {
 // =============================================================================
 
 extern "C" void retro_run(void) {
-    // 1. Input
-    if (input_poll_cb) input_poll_cb();
-    update_ymir_input();
+    try { // ESCUDO DE EXECUÇÃO
+        // 1. Input
+        if (input_poll_cb) input_poll_cb();
+        update_ymir_input();
 
-    // 2. Limpar os buffers de interceptação antes do frame
-    g_video_fb = nullptr;
-    g_audio_buffer.clear();
+        // 2. Limpar os buffers de interceptação antes do frame
+        g_video_fb = nullptr;
+        g_audio_buffer.clear();
 
-    // 3. Emulação (O coração do emulador)
-    if (g_saturn) {
-        g_saturn->RunFrame();
-    }
-
-    // 4. Enviar Vídeo para o RetroArch
-    if (video_cb) {
-        if (g_video_fb != nullptr) {
-            // Atualiza a geometria dinamicamente se a resolução interna do VDP mudou
-            if (g_video_w != g_prev_width || g_video_h != g_prev_height) {
-                struct retro_game_geometry geom;
-                geom.base_width   = g_video_w;
-                geom.base_height  = g_video_h;
-                geom.max_width    = 704;
-                geom.max_height   = 512;
-                geom.aspect_ratio = 4.0 / 3.0;
-                env_cb(RETRO_ENVIRONMENT_SET_GEOMETRY, &geom);
-                g_prev_width = g_video_w;
-                g_prev_height = g_video_h;
-            }
-            unsigned pitch = g_video_w * sizeof(uint32_t);
-            video_cb(g_video_fb, g_video_w, g_video_h, pitch);
-        } else {
-            // Se o callback de vídeo não disparou neste frame, envia frame vazio
-            video_cb(NULL, 320, 240, 320 * sizeof(uint32_t));
+        // 3. Emulação (O coração do emulador)
+        if (g_saturn) {
+            g_saturn->RunFrame();
         }
-    }
 
-    // 5. Enviar Áudio para o RetroArch
-    if (audio_cb && !g_audio_buffer.empty()) {
-        // audio_cb espera o número de FRAMES (pares L+R), e não samples individuais
-        size_t num_frames = g_audio_buffer.size() / 2;
-        audio_cb(g_audio_buffer.data(), num_frames);
+        // 4. Enviar Vídeo para o RetroArch
+        if (video_cb) {
+            if (g_video_fb != nullptr) {
+                if (g_video_w != g_prev_width || g_video_h != g_prev_height) {
+                    struct retro_game_geometry geom;
+                    geom.base_width   = g_video_w;
+                    geom.base_height  = g_video_h;
+                    geom.max_width    = 704;
+                    geom.max_height   = 512;
+                    geom.aspect_ratio = 4.0 / 3.0;
+                    env_cb(RETRO_ENVIRONMENT_SET_GEOMETRY, &geom);
+                    g_prev_width = g_video_w;
+                    g_prev_height = g_video_h;
+                }
+                unsigned pitch = g_video_w * sizeof(uint32_t);
+                video_cb(g_video_fb, g_video_w, g_video_h, pitch);
+            } else {
+                video_cb(NULL, 320, 240, 320 * sizeof(uint32_t));
+            }
+        }
+
+        // 5. Enviar Áudio para o RetroArch
+        if (audio_cb && !g_audio_buffer.empty()) {
+            size_t num_frames = g_audio_buffer.size() / 2;
+            audio_cb(g_audio_buffer.data(), num_frames);
+        }
+    } catch (const std::exception& e) {
+        printf("[Ymir Libretro] ERRO FATAL DURANTE A EXECUCAO: %s\n", e.what());
     }
 }
 
@@ -292,7 +300,6 @@ extern "C" void retro_cheat_reset(void) {}
 extern "C" void retro_cheat_set(unsigned index, bool enabled, const char *code) {}
 
 extern "C" unsigned retro_get_region(void) { 
-    // Futuro: checar g_saturn->GetVideoStandard() para alternar dinamicamente entre NTSC e PAL
     return RETRO_REGION_NTSC; 
 }
 
