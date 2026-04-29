@@ -16,6 +16,7 @@
 #include <fstream>
 #include <vector>
 #include <algorithm>
+#include <span>
 
 // =============================================================================
 // Inclusões do Motor Ymir
@@ -176,6 +177,26 @@ extern "C" bool retro_load_game(const struct retro_game_info *game) {
     try {
         if (!game || !game->path) return false;
 
+        // ---> O DICIONÁRIO DE CONTROLES (LIBERA O MENU DO RETROARCH) <---
+        struct retro_input_descriptor desc[] = {
+            { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Cima" },
+            { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Baixo" },
+            { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Esquerda" },
+            { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "D-Pad Direita" },
+            { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "Botao A (Saturn)" },
+            { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "Botao B (Saturn)" },
+            { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Botao C (Saturn)" },
+            { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y,     "Botao X (Saturn)" },
+            { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X,     "Botao Y (Saturn)" },
+            { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L,     "Botao Z (Saturn)" },
+            { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2,    "Gatilho L" },
+            { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2,    "Gatilho R" },
+            { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
+            { 0, 0, 0, 0, NULL }
+        };
+        if (env_cb) env_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc);
+        // ----------------------------------------------------------------
+
         enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_XRGB8888;
         if (!env_cb || !env_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt)) {
             if (log_cb) log_cb(RETRO_LOG_WARN, "[Ymir Libretro] Aviso: Frontend nao suporta XRGB8888.\n");
@@ -211,6 +232,12 @@ extern "C" bool retro_load_game(const struct retro_game_info *game) {
         }
 
         g_saturn->LoadDisc(std::move(disc));
+
+        // ---> AJUSTES PARA BURLAR A TELA DO RELÓGIO/CD PLAYER E IR PARA O JOGO <---
+        g_saturn->UsePreferredRegion(); 
+        g_saturn->CloseTray(); 
+        // --------------------------------------------------------------------------
+
         g_saturn->Reset(true); 
 
         if (log_cb) log_cb(RETRO_LOG_INFO, "[Ymir Libretro] Jogo carregado e resetado com sucesso.\n");
@@ -276,7 +303,6 @@ extern "C" void retro_run(void) {
 
 extern "C" void retro_reset(void) { if (g_saturn) g_saturn->Reset(true); }
 
-// ---> ADICIONE ESTAS 3 LINHAS AQUI <---
 extern "C" void retro_set_controller_port_device(unsigned port, unsigned device) {
     // Stub vazio obrigatório pelo RetroArch
 }
