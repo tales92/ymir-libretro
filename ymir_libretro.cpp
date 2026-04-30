@@ -1,9 +1,8 @@
 // =============================================================================
 // Ymir Core - Libretro Interface (Sega Saturn Emulator)
 // =============================================================================
-// Versão Final Completa: CPU, VDP (Vídeo Dinâmico), SCSP (Áudio Push), 
-// LoadDisc (Mídia) e SMPC (Input Active-Low) totalmente integrados.
-// BLINDADO: Com blocos try/catch e Log Nativo do RetroArch (log_cb).
+// Versão Final Completa: CPU, VDP, SCSP, LoadDisc, SMPC.
+// BÔNUS: Piloto Automático ativado para pular a tela do relógio!
 // =============================================================================
 
 #include <exception>
@@ -66,7 +65,7 @@ static void ymir_audio_output_callback(sint16 left, sint16 right, void* /*userda
 }
 
 // =============================================================================
-// Funções de Mapeamento de Input
+// Funções de Mapeamento de Input (COM PILOTO AUTOMÁTICO)
 // =============================================================================
 static void update_ymir_input() {
     if (!g_saturn || !g_pad1 || !input_state_cb) return;
@@ -74,6 +73,21 @@ static void update_ymir_input() {
     auto& report = g_pad1->GetReport();
     auto current_buttons = ymir::peripheral::Button::All;
 
+    // --- O NOSSO ROBÔ FANTASMA PULA-BIOS ---
+    static int boot_frame_count = 0;
+    boot_frame_count++;
+
+    // Entre 5 e 6 segundos (frames 300 a 360), o robô segura a Seta para Baixo
+    if (boot_frame_count > 300 && boot_frame_count < 360) {
+        current_buttons &= ~ymir::peripheral::Button::Down;
+    } 
+    // Entre 7 e 8 segundos (frames 420 a 480), o robô segura o botão C para confirmar o Exit
+    else if (boot_frame_count > 420 && boot_frame_count < 480) {
+        current_buttons &= ~ymir::peripheral::Button::C;
+    }
+    // -----------------------------------------
+
+    // Leitura normal do seu teclado/controle para quando o jogo começar
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP))    current_buttons &= ~ymir::peripheral::Button::Up;
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN))  current_buttons &= ~ymir::peripheral::Button::Down;
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT))  current_buttons &= ~ymir::peripheral::Button::Left;
@@ -87,14 +101,11 @@ static void update_ymir_input() {
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X))     current_buttons &= ~ymir::peripheral::Button::Y;
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L))     current_buttons &= ~ymir::peripheral::Button::Z;
     
-    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2))    current_buttons &= ~ymir::peripheral::Button::L;
-    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2))    current_buttons &= ~ymir::peripheral::Button::R;
-
     report.buttons = current_buttons;
 }
 
 // =============================================================================
-// Funções de Registro de Callbacks
+// Funções de Registro e Inicialização
 // =============================================================================
 
 extern "C" void retro_set_environment(retro_environment_t cb) { 
@@ -132,10 +143,6 @@ extern "C" void retro_get_system_av_info(struct retro_system_av_info *info) {
     info->timing.sample_rate    = 44100.0;
 }
 
-// =============================================================================
-// Funções de Ciclo de Vida
-// =============================================================================
-
 extern "C" void retro_init(void) {
     try {
         g_saturn = std::make_unique<ymir::Saturn>();
@@ -148,9 +155,6 @@ extern "C" void retro_init(void) {
             }
             g_saturn->VDP.SetSoftwareRenderCallback(ymir_video_frame_complete);
             g_saturn->SCSP.SetSampleCallback(ymir_audio_output_callback);
-            
-            // O LUGAR CORRETO: Plugar o controle antes do console ligar!
-            g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
         }
         
         g_prev_width = 0;
@@ -170,17 +174,10 @@ extern "C" bool retro_load_game(const struct retro_game_info *game) {
     try {
         if (!game || !game->path) return false;
 
-        // 1. AVISO OFICIAL PARA O RETROARCH SOBRE A PORTA 1
-        struct retro_controller_description controllers[] = {
-            { "Controle de Saturn", RETRO_DEVICE_JOYPAD }
-        };
-        struct retro_controller_info ports[] = {
-            { controllers, 1 },
-            { 0, 0 }
-        };
+        struct retro_controller_description controllers[] = { { "Controle de Saturn", RETRO_DEVICE_JOYPAD } };
+        struct retro_controller_info ports[] = { { controllers, 1 }, { 0, 0 } };
         if (env_cb) env_cb(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, (void*)ports);
 
-        // 2. DICIONÁRIO DE CONTROLES
         struct retro_input_descriptor desc[] = {
             { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Cima" },
             { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Baixo" },
@@ -222,7 +219,12 @@ extern "C" bool retro_load_game(const struct retro_game_info *game) {
         g_saturn->LoadDisc(std::move(disc));
         g_saturn->UsePreferredRegion(); 
         g_saturn->CloseTray(); 
+        
+        // 1. Reseta o console
         g_saturn->Reset(true); 
+
+        // 2. PLUGA O CONTROLE AQUI, EXATAMENTE APÓS O RESET!
+        g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
 
         return true;
     } catch (const std::exception& e) {
@@ -272,7 +274,10 @@ extern "C" void retro_run(void) {
 }
 
 extern "C" void retro_reset(void) { 
-    if (g_saturn) g_saturn->Reset(true); 
+    if (g_saturn) {
+        g_saturn->Reset(true); 
+        g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
+    }
 }
 
 extern "C" void retro_set_controller_port_device(unsigned port, unsigned device) {}
