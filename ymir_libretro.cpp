@@ -4,7 +4,7 @@
 // Versão Final Completa: CPU, VDP (Vídeo Dinâmico), SCSP (Áudio Push), 
 // LoadDisc (Mídia) e SMPC (Input Active-Low) totalmente integrados.
 // BLINDADO: Com blocos try/catch e Log Nativo do RetroArch (log_cb).
-// CORREÇÃO DE CONTROLE: Controle conectado APÓS o reset do console.
+// MODO DETETIVE ATIVADO: Escutando o botão "Baixo" do teclado/controle.
 // =============================================================================
 
 #include <exception>
@@ -69,7 +69,7 @@ static void ymir_audio_output_callback(sint16 left, sint16 right, void* /*userda
 }
 
 // =============================================================================
-// Funções de Mapeamento de Input
+// Funções de Mapeamento de Input (MODO DETETIVE ATIVADO)
 // =============================================================================
 static void update_ymir_input() {
     if (!g_saturn || !g_pad1 || !input_state_cb) return;
@@ -77,8 +77,23 @@ static void update_ymir_input() {
     auto& report = g_pad1->GetReport();
     auto current_buttons = ymir::peripheral::Button::All;
 
+    // --- INÍCIO DO CÓDIGO DE INVESTIGAÇÃO ---
+    static bool log_disparado = false;
+    
+    // Pergunta ao RetroArch se o botão "Baixo" do D-Pad está sendo apertado
+    int apertou_baixo = input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN);
+    
+    if (apertou_baixo && !log_disparado) {
+        // Se sim, avisa no log (apenas 1 vez por aperto para não travar o PC)
+        if (log_cb) log_cb(RETRO_LOG_INFO, "[DETETIVE YMIR] SINAL RECEBIDO! O RetroArch mandou o botao BAIXO para o nucleo.\n");
+        log_disparado = true; 
+    } else if (!apertou_baixo) {
+        log_disparado = false; // Reseta a escuta quando você soltar o dedo
+    }
+    // --- FIM DO CÓDIGO DE INVESTIGAÇÃO ---
+
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP))    current_buttons &= ~ymir::peripheral::Button::Up;
-    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN))  current_buttons &= ~ymir::peripheral::Button::Down;
+    if (apertou_baixo)                                                           current_buttons &= ~ymir::peripheral::Button::Down; // Usa a nossa variável de escuta
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT))  current_buttons &= ~ymir::peripheral::Button::Left;
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT)) current_buttons &= ~ymir::peripheral::Button::Right;
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START)) current_buttons &= ~ymir::peripheral::Button::Start;
