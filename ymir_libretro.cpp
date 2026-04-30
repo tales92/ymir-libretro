@@ -4,6 +4,7 @@
 // Versão Final Completa: CPU, VDP (Vídeo Dinâmico), SCSP (Áudio Push), 
 // LoadDisc (Mídia) e SMPC (Input Active-Low) totalmente integrados.
 // BLINDADO: Com blocos try/catch e Log Nativo do RetroArch (log_cb).
+// CORREÇÃO DE CONTROLE: Controle conectado APÓS o reset do console.
 // =============================================================================
 
 #include <exception>
@@ -156,7 +157,8 @@ extern "C" void retro_init(void) {
             }
             g_saturn->VDP.SetSoftwareRenderCallback(ymir_video_frame_complete);
             g_saturn->SCSP.SetSampleCallback(ymir_audio_output_callback);
-            g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
+            
+            // O controle NÃO é mais conectado aqui. Será conectado após o reset do disco.
         }
         
         g_prev_width = 0;
@@ -233,12 +235,16 @@ extern "C" bool retro_load_game(const struct retro_game_info *game) {
 
         g_saturn->LoadDisc(std::move(disc));
 
-        // ---> AJUSTES PARA BURLAR A TELA DO RELÓGIO/CD PLAYER E IR PARA O JOGO <---
+        // ---> AJUSTES PARA BURLAR A TELA DO RELÓGIO/CD PLAYER <---
         g_saturn->UsePreferredRegion(); 
         g_saturn->CloseTray(); 
-        // --------------------------------------------------------------------------
+        // ---------------------------------------------------------
 
+        // 1º O videogame é resetado (o que limpa as portas de controle)
         g_saturn->Reset(true); 
+
+        // 2º O controle é plugado AGORA!
+        g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
 
         if (log_cb) log_cb(RETRO_LOG_INFO, "[Ymir Libretro] Jogo carregado e resetado com sucesso.\n");
         return true;
@@ -301,7 +307,12 @@ extern "C" void retro_run(void) {
 // Funções de Suporte
 // =============================================================================
 
-extern "C" void retro_reset(void) { if (g_saturn) g_saturn->Reset(true); }
+extern "C" void retro_reset(void) { 
+    if (g_saturn) {
+        g_saturn->Reset(true); 
+        g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
+    }
+}
 
 extern "C" void retro_set_controller_port_device(unsigned port, unsigned device) {
     // Stub vazio obrigatório pelo RetroArch
