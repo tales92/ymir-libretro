@@ -4,7 +4,6 @@
 // Versão Final Completa: CPU, VDP (Vídeo Dinâmico), SCSP (Áudio Push), 
 // LoadDisc (Mídia) e SMPC (Input Active-Low) totalmente integrados.
 // BLINDADO: Com blocos try/catch e Log Nativo do RetroArch (log_cb).
-// MODO DETETIVE ATIVADO: Escutando o botão "Baixo" do teclado/controle.
 // =============================================================================
 
 #include <exception>
@@ -49,9 +48,7 @@ static retro_video_refresh_t video_cb       = NULL;
 static retro_audio_sample_batch_t audio_cb  = NULL;
 static retro_input_poll_t input_poll_cb     = NULL;
 static retro_input_state_t input_state_cb   = NULL;
-
-// O Rádio Comunicador Oficial do RetroArch
-static retro_log_printf_t log_cb = NULL;
+static retro_log_printf_t log_cb            = NULL;
 
 // =============================================================================
 // Callbacks de Push do Ymir
@@ -69,7 +66,7 @@ static void ymir_audio_output_callback(sint16 left, sint16 right, void* /*userda
 }
 
 // =============================================================================
-// Funções de Mapeamento de Input (MODO DETETIVE ATIVADO)
+// Funções de Mapeamento de Input
 // =============================================================================
 static void update_ymir_input() {
     if (!g_saturn || !g_pad1 || !input_state_cb) return;
@@ -77,23 +74,8 @@ static void update_ymir_input() {
     auto& report = g_pad1->GetReport();
     auto current_buttons = ymir::peripheral::Button::All;
 
-    // --- INÍCIO DO CÓDIGO DE INVESTIGAÇÃO ---
-    static bool log_disparado = false;
-    
-    // Pergunta ao RetroArch se o botão "Baixo" do D-Pad está sendo apertado
-    int apertou_baixo = input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN);
-    
-    if (apertou_baixo && !log_disparado) {
-        // Se sim, avisa no log (apenas 1 vez por aperto para não travar o PC)
-        if (log_cb) log_cb(RETRO_LOG_INFO, "[DETETIVE YMIR] SINAL RECEBIDO! O RetroArch mandou o botao BAIXO para o nucleo.\n");
-        log_disparado = true; 
-    } else if (!apertou_baixo) {
-        log_disparado = false; // Reseta a escuta quando você soltar o dedo
-    }
-    // --- FIM DO CÓDIGO DE INVESTIGAÇÃO ---
-
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP))    current_buttons &= ~ymir::peripheral::Button::Up;
-    if (apertou_baixo)                                                           current_buttons &= ~ymir::peripheral::Button::Down; // Usa a nossa variável de escuta
+    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN))  current_buttons &= ~ymir::peripheral::Button::Down;
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT))  current_buttons &= ~ymir::peripheral::Button::Left;
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT)) current_buttons &= ~ymir::peripheral::Button::Right;
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START)) current_buttons &= ~ymir::peripheral::Button::Start;
@@ -112,13 +94,11 @@ static void update_ymir_input() {
 }
 
 // =============================================================================
-// Funções de Registro de Callbacks (Obrigatórias)
+// Funções de Registro de Callbacks
 // =============================================================================
 
 extern "C" void retro_set_environment(retro_environment_t cb) { 
     env_cb = cb; 
-    
-    // Capturando a função de Log do RetroArch
     struct retro_log_callback logging;
     if (env_cb(RETRO_ENVIRONMENT_GET_LOG_INTERFACE, &logging)) {
         log_cb = logging.log;
@@ -129,10 +109,6 @@ extern "C" void retro_set_audio_sample(retro_audio_sample_t cb) { (void)cb; }
 extern "C" void retro_set_audio_sample_batch(retro_audio_sample_batch_t cb) { audio_cb = cb; }
 extern "C" void retro_set_input_poll(retro_input_poll_t cb) { input_poll_cb = cb; }
 extern "C" void retro_set_input_state(retro_input_state_t cb) { input_state_cb = cb; }
-
-// =============================================================================
-// Funções Informativas
-// =============================================================================
 
 extern "C" unsigned retro_api_version(void) { return RETRO_API_VERSION; }
 
@@ -173,14 +149,14 @@ extern "C" void retro_init(void) {
             g_saturn->VDP.SetSoftwareRenderCallback(ymir_video_frame_complete);
             g_saturn->SCSP.SetSampleCallback(ymir_audio_output_callback);
             
-            // O controle NÃO é mais conectado aqui. Será conectado após o reset do disco.
+            // O LUGAR CORRETO: Plugar o controle antes do console ligar!
+            g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
         }
         
         g_prev_width = 0;
         g_prev_height = 0;
-        if (log_cb) log_cb(RETRO_LOG_INFO, "[Ymir Libretro] Nucleo inicializado com sucesso.\n");
     } catch (const std::exception& e) {
-        if (log_cb) log_cb(RETRO_LOG_ERROR, "[Ymir Libretro] ERRO FATAL NO INIT: %s\n", e.what());
+        if (log_cb) log_cb(RETRO_LOG_ERROR, "[Ymir Libretro] ERRO NO INIT: %s\n", e.what());
     }
 }
 
@@ -194,7 +170,17 @@ extern "C" bool retro_load_game(const struct retro_game_info *game) {
     try {
         if (!game || !game->path) return false;
 
-        // ---> O DICIONÁRIO DE CONTROLES (LIBERA O MENU DO RETROARCH) <---
+        // 1. AVISO OFICIAL PARA O RETROARCH SOBRE A PORTA 1
+        struct retro_controller_description controllers[] = {
+            { "Controle de Saturn", RETRO_DEVICE_JOYPAD }
+        };
+        struct retro_controller_info ports[] = {
+            { controllers, 1 },
+            { 0, 0 }
+        };
+        if (env_cb) env_cb(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, (void*)ports);
+
+        // 2. DICIONÁRIO DE CONTROLES
         struct retro_input_descriptor desc[] = {
             { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Cima" },
             { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Baixo" },
@@ -206,18 +192,13 @@ extern "C" bool retro_load_game(const struct retro_game_info *game) {
             { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y,     "Botao X (Saturn)" },
             { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X,     "Botao Y (Saturn)" },
             { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L,     "Botao Z (Saturn)" },
-            { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2,    "Gatilho L" },
-            { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2,    "Gatilho R" },
             { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
             { 0, 0, 0, 0, NULL }
         };
         if (env_cb) env_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc);
-        // ----------------------------------------------------------------
 
         enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_XRGB8888;
-        if (!env_cb || !env_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt)) {
-            if (log_cb) log_cb(RETRO_LOG_WARN, "[Ymir Libretro] Aviso: Frontend nao suporta XRGB8888.\n");
-        }
+        if (env_cb) env_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt);
 
         const char *system_dir = NULL;
         if (env_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system_dir) && system_dir) {
@@ -228,43 +209,23 @@ extern "C" bool retro_load_game(const struct retro_game_info *game) {
             
             if (iplFile.is_open() && iplFile.read(reinterpret_cast<char*>(iplData.data()), kIPLSize)) {
                 g_saturn->LoadIPL(std::span<uint8_t, kIPLSize>(iplData.data(), kIPLSize));
-                if (log_cb) log_cb(RETRO_LOG_INFO, "[Ymir Libretro] BIOS carregada: %s\n", iplPath.string().c_str());
             } else {
-                if (log_cb) log_cb(RETRO_LOG_ERROR, "[Ymir Libretro] Erro fatal: BIOS (saturn_bios.bin) nao encontrada em %s\n", iplPath.string().c_str());
                 return false; 
             }
         } else {
-            if (log_cb) log_cb(RETRO_LOG_ERROR, "[Ymir Libretro] Erro fatal: Diretorio de sistema (system_dir) nao definido no RetroArch.\n");
             return false;
         }
 
-        if (log_cb) log_cb(RETRO_LOG_INFO, "[Ymir Libretro] Carregando disco: %s\n", game->path);
-        
         ymir::media::Disc disc;
-        bool loaded = ymir::media::LoadDisc(game->path, disc, false, nullptr);
-        
-        if (!loaded) {
-            if (log_cb) log_cb(RETRO_LOG_ERROR, "[Ymir Libretro] Falha ao analisar/abrir o arquivo de disco: %s\n", game->path);
-            return false;
-        }
+        if (!ymir::media::LoadDisc(game->path, disc, false, nullptr)) return false;
 
         g_saturn->LoadDisc(std::move(disc));
-
-        // ---> AJUSTES PARA BURLAR A TELA DO RELÓGIO/CD PLAYER <---
         g_saturn->UsePreferredRegion(); 
         g_saturn->CloseTray(); 
-        // ---------------------------------------------------------
-
-        // 1º O videogame é resetado (o que limpa as portas de controle)
         g_saturn->Reset(true); 
 
-        // 2º O controle é plugado AGORA!
-        g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
-
-        if (log_cb) log_cb(RETRO_LOG_INFO, "[Ymir Libretro] Jogo carregado e resetado com sucesso.\n");
         return true;
     } catch (const std::exception& e) {
-        if (log_cb) log_cb(RETRO_LOG_ERROR, "[Ymir Libretro] EXCECAO C++ DURANTE O LOAD_GAME: %s\n", e.what());
         return false;
     }
 }
@@ -272,10 +233,6 @@ extern "C" bool retro_load_game(const struct retro_game_info *game) {
 extern "C" void retro_unload_game(void) {
     if (g_saturn) g_saturn->EjectDisc();
 }
-
-// =============================================================================
-// O Loop Principal
-// =============================================================================
 
 extern "C" void retro_run(void) {
     try {
@@ -285,9 +242,7 @@ extern "C" void retro_run(void) {
         g_video_fb = nullptr;
         g_audio_buffer.clear();
 
-        if (g_saturn) {
-            g_saturn->RunFrame();
-        }
+        if (g_saturn) g_saturn->RunFrame();
 
         if (video_cb) {
             if (g_video_fb != nullptr) {
@@ -302,37 +257,25 @@ extern "C" void retro_run(void) {
                     g_prev_width = g_video_w;
                     g_prev_height = g_video_h;
                 }
-                unsigned pitch = g_video_w * sizeof(uint32_t);
-                video_cb(g_video_fb, g_video_w, g_video_h, pitch);
+                video_cb(g_video_fb, g_video_w, g_video_h, g_video_w * sizeof(uint32_t));
             } else {
                 video_cb(NULL, 320, 240, 320 * sizeof(uint32_t));
             }
         }
 
         if (audio_cb && !g_audio_buffer.empty()) {
-            size_t num_frames = g_audio_buffer.size() / 2;
-            audio_cb(g_audio_buffer.data(), num_frames);
+            audio_cb(g_audio_buffer.data(), g_audio_buffer.size() / 2);
         }
     } catch (const std::exception& e) {
-        if (log_cb) log_cb(RETRO_LOG_ERROR, "[Ymir Libretro] ERRO FATAL DURANTE A EXECUCAO (RUN): %s\n", e.what());
+        if (log_cb) log_cb(RETRO_LOG_ERROR, "[Ymir Libretro] ERRO NO RUN: %s\n", e.what());
     }
 }
-
-// =============================================================================
-// Funções de Suporte
-// =============================================================================
 
 extern "C" void retro_reset(void) { 
-    if (g_saturn) {
-        g_saturn->Reset(true); 
-        g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
-    }
+    if (g_saturn) g_saturn->Reset(true); 
 }
 
-extern "C" void retro_set_controller_port_device(unsigned port, unsigned device) {
-    // Stub vazio obrigatório pelo RetroArch
-}
-
+extern "C" void retro_set_controller_port_device(unsigned port, unsigned device) {}
 extern "C" size_t retro_serialize_size(void) { return 0; }
 extern "C" bool retro_serialize(void *data, size_t size) { return false; }
 extern "C" bool retro_unserialize(const void *data, size_t size) { return false; }
