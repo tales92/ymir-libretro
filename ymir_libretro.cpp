@@ -1,7 +1,7 @@
 // =============================================================================
 // Ymir Core - Libretro Interface (Sega Saturn Emulator)
 // =============================================================================
-// Versão Final: BRAM Formal implementada + Sincronização de Controles Corrigida.
+// Versão Final: BRAM Formal implementada + Sincronização de Hardware Corrigida.
 // =============================================================================
 
 #include <exception>
@@ -253,10 +253,9 @@ extern "C" bool retro_load_game(const struct retro_game_info* game) {
         g_saturn->LoadDisc(std::move(disc));
         g_saturn->UsePreferredRegion();
         g_saturn->CloseTray();
-        g_saturn->Reset(true); 
-
-        // O controle E a memória serão conectados no PRIMEIRO FRAME do retro_run, 
-        // para garantir que os dados do RetroArch chegaram e evitar a perda de conexão.
+        
+        // Removemos o Reset e o ConnectControlPad daqui, 
+        // pois a placa será reiniciada no primeiro quadro.
 
         return true;
     } catch (const std::exception& e) {
@@ -277,10 +276,15 @@ extern "C" void retro_unload_game(void) {
 extern "C" void retro_run(void) {
     try {
         if (g_first_frame) {
-            // A BRAM é injetada de forma segura com os dados que o RetroArch enviou
+            // 1. Injetamos a memória fornecida pelo RetroArch
             bram_push_to_ymir();
-            // O controle é plugado LOGO EM SEGUIDA, blindado de qualquer reset interno
+            
+            // 2. Aplicamos um Hard Reset para o sistema digerir a nova memória
+            g_saturn->Reset(true);
+            
+            // 3. Somente após o reset, plugamos o controle para não ser desconectado
             g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
+            
             g_first_frame = false;
         }
 
@@ -332,8 +336,10 @@ extern "C" void retro_run(void) {
 extern "C" void retro_reset(void) {
     if (!g_saturn) return;
     bram_pull_from_ymir();
-    g_saturn->Reset(true);
+    
+    // A mesma ordem deve ser mantida ao resetar pelo menu do RetroArch
     bram_push_to_ymir();
+    g_saturn->Reset(true);
     g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
 }
 
