@@ -1,170 +1,11 @@
 // =============================================================================
-// Ymir Core - Libretro Interface (Sega Saturn Emulator)
+// Estado Global — mudança de nome para semântica mais clara
 // =============================================================================
-// Versão Final: BRAM Formal implementada + Sincronização de Hardware Corrigida.
-// =============================================================================
-
-#include <exception>
-#include <libretro.h>
-#include <stdint.h>
-#include <string.h>
-#include <stdio.h>
-#include <memory>
-#include <filesystem>
-#include <fstream>
-#include <vector>
-#include <array>
-#include <algorithm>
-#include <span>
+static bool g_system_reset_pending = true; // true = Reset+BRAM pendentes para o próximo frame
 
 // =============================================================================
-// Inclusões do Motor Ymir
+// retro_init — sem mudança de lógica, apenas nome da flag
 // =============================================================================
-#include <ymir/sys/saturn.hpp>
-#include <ymir/sys/backup_ram_defs.hpp>
-#include <ymir/hw/vdp/renderer/vdp_renderer_sw.hpp>
-#include <ymir/media/disc.hpp>
-#include <ymir/media/loader/loader.hpp>
-#include <ymir/hw/smpc/peripheral/peripheral_port.hpp>
-#include <ymir/hw/smpc/peripheral/peripheral_impl_control_pad.hpp>
-
-// =============================================================================
-// Estado Global do Core
-// =============================================================================
-static std::unique_ptr<ymir::Saturn> g_saturn = nullptr;
-static ymir::peripheral::ControlPad* g_pad1   = nullptr;
-static bool g_first_frame = true;
-
-static const uint32* g_video_fb  = nullptr;
-static uint32_t      g_video_w   = 0;
-static uint32_t      g_video_h   = 0;
-static uint32_t      g_prev_width  = 0;
-static uint32_t      g_prev_height = 0;
-
-static std::vector<int16_t> g_audio_buffer;
-
-static constexpr size_t k_BRAM_Size = 32 * 1024; // 32.768 bytes
-static std::array<uint8_t, k_BRAM_Size> g_bram_mirror{};
-static std::filesystem::path g_bram_path; 
-
-// Callbacks Estáticos do Ambiente Libretro
-static retro_environment_t        env_cb         = nullptr;
-static retro_video_refresh_t      video_cb       = nullptr;
-static retro_audio_sample_batch_t audio_cb       = nullptr;
-static retro_input_poll_t         input_poll_cb  = nullptr;
-static retro_input_state_t        input_state_cb = nullptr;
-static retro_log_printf_t         log_cb         = nullptr;
-
-// =============================================================================
-// Callbacks de Push do Ymir
-// =============================================================================
-
-static void ymir_video_frame_complete(uint32* fb, uint32 width, uint32 height, void*) {
-    g_video_fb = fb;
-    g_video_w  = width;
-    g_video_h  = height;
-}
-
-static void ymir_audio_output_callback(sint16 left, sint16 right, void*) {
-    g_audio_buffer.push_back(left);
-    g_audio_buffer.push_back(right);
-}
-
-// =============================================================================
-// Sincronização BRAM
-// =============================================================================
-
-static void bram_push_to_ymir() {
-    if (!g_saturn || g_bram_path.empty()) return;
-
-    {
-        std::ofstream f(g_bram_path, std::ios::binary | std::ios::trunc);
-        if (!f.is_open()) return;
-        f.write(reinterpret_cast<const char*>(g_bram_mirror.data()), static_cast<std::streamsize>(k_BRAM_Size));
-    }
-
-    std::error_code ec;
-    g_saturn->LoadInternalBackupMemoryImage(g_bram_path, false, ec);
-    if (ec && log_cb) {
-        log_cb(RETRO_LOG_WARN, "[Ymir] BRAM push falhou: %s\n", ec.message().c_str());
-    }
-}
-
-static void bram_pull_from_ymir() {
-    if (g_bram_path.empty()) return;
-
-    std::ifstream f(g_bram_path, std::ios::binary);
-    if (!f.is_open()) return;
-
-    f.read(reinterpret_cast<char*>(g_bram_mirror.data()), static_cast<std::streamsize>(k_BRAM_Size));
-}
-
-// =============================================================================
-// Mapeamento de Input
-// =============================================================================
-static void update_ymir_input() {
-    if (!g_saturn || !g_pad1 || !input_state_cb) return;
-
-    auto& report          = g_pad1->GetReport();
-    auto  current_buttons = ymir::peripheral::Button::All; 
-
-    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP))    current_buttons &= ~ymir::peripheral::Button::Up;
-    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN))  current_buttons &= ~ymir::peripheral::Button::Down;
-    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT))  current_buttons &= ~ymir::peripheral::Button::Left;
-    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT)) current_buttons &= ~ymir::peripheral::Button::Right;
-    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START)) current_buttons &= ~ymir::peripheral::Button::Start;
-
-    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B))     current_buttons &= ~ymir::peripheral::Button::A;
-    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A))     current_buttons &= ~ymir::peripheral::Button::B;
-    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R))     current_buttons &= ~ymir::peripheral::Button::C;
-    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y))     current_buttons &= ~ymir::peripheral::Button::X;
-    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X))     current_buttons &= ~ymir::peripheral::Button::Y;
-    if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L))     current_buttons &= ~ymir::peripheral::Button::Z;
-
-    report.buttons = current_buttons;
-}
-
-// =============================================================================
-// Funções de Registro
-// =============================================================================
-
-extern "C" void retro_set_environment(retro_environment_t cb) {
-    env_cb = cb;
-    struct retro_log_callback logging;
-    if (env_cb(RETRO_ENVIRONMENT_GET_LOG_INTERFACE, &logging)) log_cb = logging.log;
-}
-extern "C" void retro_set_video_refresh(retro_video_refresh_t cb)            { video_cb       = cb; }
-extern "C" void retro_set_audio_sample(retro_audio_sample_t cb)               { (void)cb;           }
-extern "C" void retro_set_audio_sample_batch(retro_audio_sample_batch_t cb)   { audio_cb       = cb; }
-extern "C" void retro_set_input_poll(retro_input_poll_t cb)                   { input_poll_cb  = cb; }
-extern "C" void retro_set_input_state(retro_input_state_t cb)                 { input_state_cb = cb; }
-
-extern "C" unsigned retro_api_version(void) { return RETRO_API_VERSION; }
-
-extern "C" void retro_get_system_info(struct retro_system_info* info) {
-    memset(info, 0, sizeof(*info));
-    info->library_name     = "Ymir";
-    info->library_version  = "0.1.0";
-    info->valid_extensions = "ccd|chd|cue|iso|mds";
-    info->need_fullpath    = true;
-    info->block_extract    = false;
-}
-
-extern "C" void retro_get_system_av_info(struct retro_system_av_info* info) {
-    memset(info, 0, sizeof(*info));
-    info->geometry.base_width   = 320;
-    info->geometry.base_height  = 240;
-    info->geometry.max_width    = 704;
-    info->geometry.max_height   = 512;
-    info->geometry.aspect_ratio = 4.0f / 3.0f;
-    info->timing.fps            = 59.94;
-    info->timing.sample_rate    = 44100.0;
-}
-
-// =============================================================================
-// Ciclo de Vida
-// =============================================================================
-
 extern "C" void retro_init(void) {
     try {
         g_saturn = std::make_unique<ymir::Saturn>();
@@ -181,7 +22,7 @@ extern "C" void retro_init(void) {
 
         g_bram_mirror.fill(0x00);
         g_bram_path.clear();
-        g_first_frame = true;
+        g_system_reset_pending = true;
         g_prev_width  = 0;
         g_prev_height = 0;
 
@@ -190,18 +31,29 @@ extern "C" void retro_init(void) {
     }
 }
 
+// =============================================================================
+// retro_deinit
+// =============================================================================
 extern "C" void retro_deinit(void) {
     g_pad1 = nullptr;
     g_saturn.reset();
     g_audio_buffer.clear();
     g_bram_mirror.fill(0x00);
     g_bram_path.clear();
-    g_first_frame = true;
+    g_system_reset_pending = true;
 }
 
+// =============================================================================
+// retro_load_game — CORREÇÃO: reseta flag e invalida pad
+// =============================================================================
 extern "C" bool retro_load_game(const struct retro_game_info* game) {
     try {
         if (!game || !game->path) return false;
+
+        // CORREÇÃO 2: Garante que o bloco de init execute mesmo em recargas
+        // de jogo sem passar por retro_deinit/retro_init.
+        g_system_reset_pending = true;
+        g_pad1 = nullptr;
 
         const char* save_dir = nullptr;
         if (env_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &save_dir) && save_dir) {
@@ -212,7 +64,9 @@ extern "C" bool retro_load_game(const struct retro_game_info* game) {
             }
         }
 
-        struct retro_controller_description controllers[] = { { "Controle Saturn Padrao", RETRO_DEVICE_JOYPAD } };
+        struct retro_controller_description controllers[] = {
+            { "Controle Saturn Padrao", RETRO_DEVICE_JOYPAD }
+        };
         struct retro_controller_info ports[] = { { controllers, 1 }, { nullptr, 0 } };
         env_cb(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, (void*)ports);
 
@@ -236,56 +90,57 @@ extern "C" bool retro_load_game(const struct retro_game_info* game) {
         env_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt);
 
         const char* system_dir = nullptr;
-        if (!env_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system_dir) || !system_dir) return false;
+        if (!env_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system_dir) || !system_dir)
+            return false;
 
         constexpr size_t kIPLSize = 524288;
         std::vector<uint8_t> iplData(kIPLSize);
-        std::filesystem::path iplPath = std::filesystem::path(system_dir) / "saturn_bios.bin";
+        std::filesystem::path iplPath =
+            std::filesystem::path(system_dir) / "saturn_bios.bin";
         std::ifstream iplFile(iplPath, std::ios::binary);
 
-        if (!iplFile.is_open() || !iplFile.read(reinterpret_cast<char*>(iplData.data()), kIPLSize)) return false;
+        if (!iplFile.is_open() ||
+            !iplFile.read(reinterpret_cast<char*>(iplData.data()), kIPLSize))
+            return false;
 
         g_saturn->LoadIPL(std::span<uint8_t, kIPLSize>(iplData.data(), kIPLSize));
 
         ymir::media::Disc disc;
-        if (!ymir::media::LoadDisc(game->path, disc, false, nullptr)) return false;
+        if (!ymir::media::LoadDisc(game->path, disc, false, nullptr))
+            return false;
 
         g_saturn->LoadDisc(std::move(disc));
         g_saturn->UsePreferredRegion();
         g_saturn->CloseTray();
-        
-        // Removemos o Reset e o ConnectControlPad daqui, 
-        // pois a placa será reiniciada no primeiro quadro.
+        // Reset e ConnectControlPad diferidos para o primeiro retro_run()
+
+        if (log_cb)
+            log_cb(RETRO_LOG_INFO,
+                   "[Ymir] Disco carregado. Reset pendente para o primeiro frame.\n");
 
         return true;
+
     } catch (const std::exception& e) {
         if (log_cb) log_cb(RETRO_LOG_ERROR, "[Ymir] ERRO NO LOAD_GAME: %s\n", e.what());
         return false;
     }
 }
 
-extern "C" void retro_unload_game(void) {
-    bram_pull_from_ymir();
-    if (g_saturn) g_saturn->EjectDisc();
-}
-
 // =============================================================================
-// Loop Principal
+// retro_run — sem mudança de lógica, apenas nome da flag
 // =============================================================================
-
 extern "C" void retro_run(void) {
     try {
-        if (g_first_frame) {
-            // 1. Injetamos a memória fornecida pelo RetroArch
+        if (g_system_reset_pending) {
             bram_push_to_ymir();
-            
-            // 2. Aplicamos um Hard Reset para o sistema digerir a nova memória
             g_saturn->Reset(true);
-            
-            // 3. Somente após o reset, plugamos o controle para não ser desconectado
             g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
-            
-            g_first_frame = false;
+            g_system_reset_pending = false;
+
+            if (log_cb)
+                log_cb(RETRO_LOG_INFO,
+                       "[Ymir] Reset executado no primeiro frame. "
+                       "BRAM injetada. Controle conectado.\n");
         }
 
         if (input_poll_cb) input_poll_cb();
@@ -300,7 +155,8 @@ extern "C" void retro_run(void) {
             } catch (const std::exception& e) {
                 static bool aviso_dado = false;
                 if (!aviso_dado && log_cb) {
-                    log_cb(RETRO_LOG_WARN, "[Ymir] Aviso ignorado no RunFrame: %s\n", e.what());
+                    log_cb(RETRO_LOG_WARN,
+                           "[Ymir] Aviso ignorado no RunFrame: %s\n", e.what());
                     aviso_dado = true;
                 }
             }
@@ -319,7 +175,8 @@ extern "C" void retro_run(void) {
                     g_prev_width  = g_video_w;
                     g_prev_height = g_video_h;
                 }
-                video_cb(g_video_fb, g_video_w, g_video_h, g_video_w * sizeof(uint32_t));
+                video_cb(g_video_fb, g_video_w, g_video_h,
+                         g_video_w * sizeof(uint32_t));
             } else {
                 video_cb(nullptr, 320, 240, 320 * sizeof(uint32_t));
             }
@@ -333,40 +190,14 @@ extern "C" void retro_run(void) {
     }
 }
 
+// =============================================================================
+// retro_reset — CORREÇÃO: ordem Reset → push (não push → Reset)
+// =============================================================================
 extern "C" void retro_reset(void) {
     if (!g_saturn) return;
-    bram_pull_from_ymir();
-    
-    // A mesma ordem deve ser mantida ao resetar pelo menu do RetroArch
-    bram_push_to_ymir();
-    g_saturn->Reset(true);
-    g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad();
-}
 
-// =============================================================================
-// Stubs e BRAM Formal
-// =============================================================================
-
-extern "C" void retro_set_controller_port_device(unsigned port, unsigned device) {
-    (void)port; (void)device;
-}
-extern "C" void retro_cheat_reset(void) {}
-extern "C" void retro_cheat_set(unsigned i, bool e, const char* c) {
-    (void)i; (void)e; (void)c;
-}
-extern "C" unsigned retro_get_region(void)  { return RETRO_REGION_NTSC; }
-extern "C" bool retro_load_game_special(unsigned, const struct retro_game_info*, size_t) { return false; }
-
-extern "C" size_t retro_serialize_size(void)                        { return 0;     }
-extern "C" bool   retro_serialize(void* data, size_t size)          { return false; }
-extern "C" bool   retro_unserialize(const void* data, size_t size)  { return false; }
-
-extern "C" void* retro_get_memory_data(unsigned id) {
-    if (id != RETRO_MEMORY_SAVE_RAM) return nullptr;
-    return g_bram_mirror.data();
-}
-
-extern "C" size_t retro_get_memory_size(unsigned id) {
-    if (id != RETRO_MEMORY_SAVE_RAM) return 0;
-    return k_BRAM_Size; 
+    bram_pull_from_ymir();   // 1. salva estado atual no arquivo
+    g_saturn->Reset(true);   // 2. Reset limpa subsistema de memória
+    bram_push_to_ymir();     // 3. reinjeta BRAM no sistema já estável
+    g_pad1 = g_saturn->SMPC.GetPeripheralPort1().ConnectControlPad(); // 4. reconecta pad
 }
